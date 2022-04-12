@@ -26,6 +26,7 @@ from .terachem_pbs import TeraChemPBSHarness
 from .torchani import TorchANIHarness
 from .turbomole import TurbomoleHarness
 from .xtb import XTBHarness
+from .gaussian import GaussianHarness
 
 __all__ = ["register_program", "get_program", "list_all_programs", "list_available_programs"]
 
@@ -115,6 +116,7 @@ register_program(QcoreHarness())
 register_program(TeraChemHarness())
 register_program(TurbomoleHarness())
 register_program(TeraChemPBSHarness())
+register_program(GaussianHarness())
 
 # Semi-empirical
 register_program(MopacHarness())
