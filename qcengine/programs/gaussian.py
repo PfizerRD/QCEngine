@@ -11,10 +11,11 @@ import cclib
 from qcelemental.models import AtomicInput, AtomicResult
 from qcelemental.util import which
 from qcengine.exceptions import UnknownError
-from qcengine.programs import ProgramHarness
 from qcengine.util import execute, get_template, disk_files
 
 from qcengine.units import ureg
+
+from .model import ProgramHarness
 
 if TYPE_CHECKING:
     from qcengine.config import TaskConfig
