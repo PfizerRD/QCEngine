@@ -6,15 +6,15 @@ A custom gaussian harness for QCEngine which should be registered with qcengine.
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import cclib
+
 from qcelemental.models import AtomicInput, AtomicResult
 from qcelemental.util import which
-from qcengine import register_program
 from qcengine.exceptions import UnknownError
 from qcengine.programs import ProgramHarness
-from qcengine.util import execute
+from qcengine.util import execute, get_template, disk_files
 
-from qubekit.utils import constants
-from qubekit.utils.file_handling import get_data
+from qcengine.units import ureg
 
 if TYPE_CHECKING:
     from qcengine.config import TaskConfig
@@ -91,8 +91,10 @@ class GaussianHarness(ProgramHarness):
         outfiles = ["gaussian.log", "lig.chk"]
         if extra_outfiles is not None:
             outfiles.extend(extra_outfiles)
-        gaussian_version = self.get_version()
-        commands = [gaussian_version, "gaussian.com"]
+
+        #FIXME: YG: only for testing, need to solve the gaussian environment
+        #gaussian_version = self.get_version()
+        commands = 'ml medsci gaussian && g16 gaussian.com'.split()
         scratch_directory = inputs["scratch_directory"]
 
         # remember before formatting lig.chk is binary, run calculation
@@ -103,9 +105,11 @@ class GaussianHarness(ProgramHarness):
             scratch_directory=scratch_directory,
             as_binary=["lig.chk"],
         )
+
         if exe_success:
             # now we need to run the conversion of the chk file
-            commands = ["formchk", "lig.chk", "lig.fchk"]
+            # FIXME: YG: only for testing, need to solve the gaussian environment
+            commands = 'ml medsci gaussian && formchk lig.chk lig.fchk'.split()
             infiles = {"lig.chk": proc["outfiles"]["lig.chk"]}
             chk_success, proc_chk = execute(
                 command=commands,
@@ -149,7 +153,7 @@ class GaussianHarness(ProgramHarness):
         """
         Convert the qcengine driver enum to the specific keyword for gaussian.
         """
-        drivers = {"energy": "SP", "gradient": "Force=NoStep", "hessian": "FREQ"}
+        drivers = {"energy": "SP", "gradient": "Force=NoStep", "hessian": "FREQ", "optimization": "opt(maxcycles=200) freq"}
         return drivers[driver.lower()]
 
     @classmethod
@@ -163,7 +167,7 @@ class GaussianHarness(ProgramHarness):
         Important:
             Symmetry must be turned off for gradient calculations so geometric is not confused.
         """
-        symmetry = {"energy": "", "gradient": "nosymm", "hessian": "nosymm"}
+        symmetry = {"energy": "", "gradient": "nosymm", "hessian": "nosymm", "optimization": "nosymm"}
         return symmetry[driver.lower()]
 
     def build_input(
@@ -175,11 +179,10 @@ class GaussianHarness(ProgramHarness):
         """
         Use the template files stored in QUBEKit to build a gaussian input file for the given driver.
         """
-        import os
 
         from jinja2 import Template
 
-        template_file = get_data(os.path.join("templates", "gaussian.com"))
+        template_file = get_template('gaussian.com')
         with open(template_file) as file:
             template = Template(file.read())
 
@@ -215,10 +218,12 @@ class GaussianHarness(ProgramHarness):
         data = []
         for i, symbol in enumerate(molecule.symbols):
             # we must convert the atomic input back to angstroms
-            data.append((symbol, molecule.geometry[i] * constants.BOHR_TO_ANGS))
+            data.append((symbol, molecule.geometry[i] * ureg.conversion_factor("bohr", "angstrom")))
         template_data["data"] = data
 
         rendered_template = template.render(**template_data)
+        # YG: add a new line to end of the com file
+        rendered_template += '\n'
         # also write to file
         with open("gaussian.com", "w") as output:
             output.write(rendered_template)
@@ -276,6 +281,8 @@ class GaussianHarness(ProgramHarness):
         provenance = {"version": version, "creator": "gaussian", "routine": "CLI"}
         # collect the total energy from the fchk file
         logfile = outfiles["lig.fchk"]
+
+        # process fchk file
         for line in logfile.split("\n"):
             if "Total Energy" in line:
                 energy = float(line.split()[3])
@@ -290,6 +297,15 @@ class GaussianHarness(ProgramHarness):
         elif input_model.driver == "hessian":
             hessian = self.parse_hessian(fchkfile=outfiles["lig.fchk"])
             output_data["return_result"] = hessian
+
+        #YG: optimization output
+        elif input_model.driver == "optimization":
+            coordinates = self.parse_coords(logfile=outfiles["gaussian.log"])
+            output_data["return_result"] = {'optimization': coordinates}
+
+            #FIXME: YG: need to separate freq from optimization, but for now, just parse all
+            output_data["return_result"]['vibfreq'] = self.parse_vibfreq(logfile=outfiles["gaussian.log"]).tolist()
+            output_data["return_result"]['thermo'] = self.parse_thermo(logfile=outfiles["gaussian.log"])
 
         # parse scf_properties
         if "scf_properties" in input_model.keywords:
@@ -309,6 +325,44 @@ class GaussianHarness(ProgramHarness):
         output_data["success"] = True
         output_data["provenance"] = provenance
         return AtomicResult(**output_data)
+
+    @classmethod
+    def parse_vibfreq(cls, logfile: str) -> np.array:
+        with disk_files(infiles={'gaussian.log': logfile}, outfiles={}) as _:
+            log_data = cclib.io.ccread('gaussian.log')
+            return log_data.vibfreqs
+
+    @classmethod
+    def parse_thermo(cls, logfile: str) -> str:
+        commands = 'python -m goodvibes gaussian.log'.split()
+        infiles = {'gaussian.log': logfile}
+        outfiles = ["Goodvibes_output.dat"]
+        exe_success, proc = execute(
+            command=commands,
+            infiles=infiles,
+            outfiles=outfiles,
+            shell=True
+        )
+        return proc["outfiles"]["Goodvibes_output.dat"]
+
+    @classmethod
+    def parse_coords(cls, logfile: str) -> str:
+        """
+        parse coordinates from the logfile
+        """
+        #FIXME: YG: need to resolve the invoking path
+        commands = '/gpfs/workspace/users/guany20/.conda/envs/QCdemo/bin/obabel -ilog gaussian.log -O optimization.xyz'.split()
+        infiles = {'gaussian.log': logfile}
+        outfiles = ['optimization.xyz']
+        exe_success, proc = execute(
+            command=commands,
+            infiles=infiles,
+            outfiles=outfiles,
+            shell=True,
+        )
+
+        return proc["outfiles"]['optimization.xyz']
+
 
     @classmethod
     def parse_version(cls, logfile: str) -> str:

@@ -295,7 +295,7 @@ def popen(
     LOGGER.info("Popen", args, popen_kwargs)
 
     # Ready the output
-    ret = {"proc": subprocess.Popen(args, **popen_kwargs)}
+    ret = {"proc": subprocess.Popen(' '.join(args), **popen_kwargs)}
 
     # Spawn threads that will read from the stderr/stdout
     #  The PIPE uses a buffer with finite capacity. The underlying
@@ -387,7 +387,7 @@ def execute(
     timeout: Optional[int] = None,
     interupt_after: Optional[int] = None,
     environment: Optional[Dict[str, str]] = None,
-    shell: Optional[bool] = False,
+    shell: Optional[bool] = True,
     exit_code: Optional[int] = 0,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
@@ -481,6 +481,7 @@ def execute(
                     terminate_process(proc["proc"])
             retcode = proc["proc"].poll()
         proc["outfiles"] = extrafiles
+
     proc["scratch_directory"] = scrdir
 
     return retcode <= exit_code, proc
@@ -622,3 +623,20 @@ def disk_files(
                     outfiles[fl] = gfls
                 else:
                     outfiles[fl] = None
+
+
+def get_template(
+        template: str = None
+) -> str:
+    """Get the file path to the QM package input template given the template name
+    Parameters
+    __________
+    template
+        The file name of the template that should be loaded from qcengine/templates
+    Returns
+    _______
+    str
+        The absolute path to the requested template
+    """
+    template_dir = Path(__file__).parents[0]/'templates'
+    return template_dir/template
