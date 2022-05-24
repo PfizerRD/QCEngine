@@ -6,10 +6,12 @@ from typing import Set
 
 from ..exceptions import InputError, ResourceError
 from .adcc import AdccHarness
+from .biovia import TurbomoleHarness
 from .cfour import CFOURHarness
 from .dftd3 import DFTD3Harness
 from .dftd4 import DFTD4Harness
 from .gamess import GAMESSHarness
+from .gaussian import GaussianHarness
 from .gcp import GCPHarness, MCTCGCPHarness
 from .molpro import MolproHarness
 from .mopac import MopacHarness
@@ -24,9 +26,7 @@ from .rdkit import RDKitHarness
 from .terachem import TeraChemHarness
 from .terachem_pbs import TeraChemPBSHarness
 from .torchani import TorchANIHarness
-from .turbomole import TurbomoleHarness
 from .xtb import XTBHarness
-from .gaussian import GaussianHarness
 
 __all__ = ["register_program", "get_program", "list_all_programs", "list_available_programs"]
 

@@ -1,59 +1,56 @@
 import itertools as it
-from subprocess import PIPE, Popen, TimeoutExpired
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
+from qcelemental.models import AtomicInput
 from qcengine.exceptions import InputError
+from qcengine.util import execute
 
 from .methods import KEYWORDS, METHODS
 
 
-def decode_define(str_: str) -> str:
-    """Decode define output.
+def define(input_model: AtomicInput) -> Tuple[bool, Dict[str, Any], Dict[str, str]]:
+    """Run define and return control"""
+    molecule = input_model.molecule
+    charge = molecule.molecular_charge
+    multiplicity = molecule.molecular_multiplicity
+    method = input_model.model.method
+    basis = input_model.model.basis
+    keywords = input_model.keywords
 
-    Depending on the employed basis set the encoding may differ.
-    """
-    try:
-        str_ = str_.decode("utf-8")
-    except UnicodeDecodeError:
-        # Some of the basis files (cbas, I'm looking at you ...) are saved
-        # in ISO-8859-15 but most of them are in UTF-8. Decoding will
-        # crash in the former cases so here we try the correct decoding.
-        str_ = str_.decode("latin-1")
-    return str_
+    coord_str, _ = input_model.molecule.to_string(dtype="turbomole", return_data=True)
+
+    define_input, _ = prepare_stdin(method, basis, keywords, charge, multiplicity)
+    infiles = {'define.in': define_input, 'coord': coord_str}
+    outfiles = ['control', 'mos', 'basis']
+
+    commands = "ml medsci turbomole && define < define.in"
+
+    exe_success, proc = execute(
+        command=commands.split(),
+        infiles=infiles,
+        outfiles=outfiles,
+    )
+
+    infiles.update(proc['outfiles'])
+
+    return exe_success, proc, infiles
 
 
-def execute_define(stdin: str, cwd: Optional["Path"] = None) -> str:
-    """Call define with the input define in stdin."""
+def execute_define(
+    inputs: Dict[str, Any],
+    scratch_name: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> str:
+    """Call define with the input define."""
+    commands = "ml medsci turbomole && define < define.in".split()
+    infiles = inputs["infiles"]
+    outfiles = ['control']
 
-    # TODO: replace this with a call to the default execute provided by QCEngine
-    # if possible. May be difficult though, as we have to pipe in stdin and
-    # be careful with the encoding.
-
-    # We cant use univeral_newlines=True or text=True in Popen as some of the
-    # data that define returns isn't proper UTF-8, so the decoding will crash.
-    # We will decode it later on manually.
-    with Popen("define", stdin=PIPE, stdout=PIPE, stderr=PIPE, cwd=cwd) as proc:
-        try:
-            # stdout, _ = proc.communicate(str.encode(stdin), timeout=30)
-            stdout, _ = proc.communicate(str.encode(stdin), timeout=15)
-            stdout = decode_define(stdout)
-        except TimeoutExpired:
-            raise InputError(f"define call timed out!")
-            # TODO: How to get the stdout when define times out? Calling
-            # communiate may also result in an indefinite hang so I disabled it
-            # for now...
-            # # Retrieve output of timed out define call
-            # stdout, stderr = proc.communicate()
-            # stdout = decode_define(stdout)
-            # stderr = decode_define(stderr)
-            # # Attach stdout and stderr of proc to error, so they can be
-            # # accessed later on.
-            # error.stdout = stdout
-            # error.stderr = stdout
-            # raise error
-        proc.terminate()
-
-    return stdout
+    exe_success, proc = execute(
+        command=commands.split(),
+        infiles=infiles,
+        outfiles=outfiles,
+    )
 
 
 def prepare_stdin(
